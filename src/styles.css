@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
 
+.profile-form { display: grid; gap: 12px; margin: 0 0 24px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: rgb(23 52 77 / 45%); }.profile-form label { display: grid; gap: 6px; color: #cfdfde; font-size: 11px; }.profile-form input { width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; color: #e8f5f4; background: var(--navy); }.profile-form .primary-button { justify-self: start; margin-top: 4px; }
 :root { font-family: 'DM Sans', sans-serif; color: #e8f5f4; background: #0d1b2a; font-synthesis: none; text-rendering: optimizeLegibility; --navy: #0d1b2a; --surface: #10253a; --surface-light: #17344d; --teal: #4ecdc4; --lavender: #a78bfa; --gold: #ffe66d; --coral: #ff6b6b; --green: #6bc580; --muted: #6fa09a; --line: rgb(111 160 154 / 20%); }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; background: var(--navy); }
