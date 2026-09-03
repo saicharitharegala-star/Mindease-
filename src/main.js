@@ -1,5 +1,7 @@
 import './styles.css';
 
+import { safeAuthRedirect, supabase, supabaseConfigured } from './lib/supabase.js';
+
 const moods = [
   { key: 'good', icon: '☀️', label: 'Good', note: 'Light & bright', color: 'gold' },
   { key: 'okay', icon: '☁️', label: 'Okay', note: 'Taking it easy', color: 'teal' },
@@ -66,7 +68,7 @@ function persistData() { localStorage.setItem('mindease:data', JSON.stringify(da
 function setAuthError(message) { authError = message; render(); }
 function isOnline() { return navigator.onLine !== false; }
 const session = {
-  authenticated: localStorage.getItem('mindease:session') === 'active',
+  authenticated: false,
   stage: 'welcome',
   email: localStorage.getItem('mindease:email') || '',
   role: localStorage.getItem('mindease:role') || 'student',
@@ -170,33 +172,32 @@ function renderAuth() {
   return `<main class="auth-shell">${stages[session.stage]}${authError ? `<p class="form-error" role="alert">${authError}</p>` : ''}</main>`;
 }
 function attachAuthEvents() {
-  document.querySelectorAll('[data-auth]').forEach((button) => button.addEventListener('click', () => {
+  document.querySelectorAll('[data-auth]').forEach((button) => button.addEventListener('click', async () => {
     const target = button.dataset.auth;
-    if (target === 'complete') { session.authenticated = true; localStorage.setItem('mindease:session', 'active'); const accounts = JSON.parse(localStorage.getItem('mindease:accounts') || '{}'); if (accounts[session.email]) { accounts[session.email].verified = true; localStorage.setItem('mindease:accounts', JSON.stringify(accounts)); } persistSettings(); track('onboarding_complete'); activeView = 'home'; render(); return; }
+    if (target === 'complete') { const { data: userData } = supabase ? await supabase.auth.getUser() : { data: { user: null } }; if (!userData.user) { setAuthError('Please sign in before entering your private space.'); return; } session.authenticated = true; persistSettings(); track('onboarding_complete'); activeView = 'home'; render(); return; }
     authError = '';
     session.stage = target; render();
   }));
   document.querySelectorAll('[data-setting]').forEach((input) => input.addEventListener('change', () => { settings[input.dataset.setting] = input.checked; persistSettings(); }));
   document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { if (button.dataset.action === 'resend') showAuthMessage('A fresh verification email is on its way.'); }));
-  document.querySelectorAll('[data-form]').forEach((form) => form.addEventListener('submit', (event) => {
+  document.querySelectorAll('[data-form]').forEach((form) => form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form));
     if (form.dataset.form === 'profile') { Object.assign(profile, values); localStorage.setItem('mindease:profile', JSON.stringify(profile)); showToast('Your profile was saved on this device.'); render(); return; }
-    if (form.dataset.form === 'reset') { const accounts = JSON.parse(localStorage.getItem('mindease:accounts') || '{}'); if (!accounts[values.email]) { setAuthError('No MindEase account was found for that email.'); return; } session.email = values.email; session.stage = 'login'; showAuthMessage('Reset link sent. For this demo, your existing password remains active.'); return; }
-    const accounts = JSON.parse(localStorage.getItem('mindease:accounts') || '{}');
-    if (form.dataset.form === 'login') {
-      if (!accounts[values.email] || accounts[values.email].password !== values.password) { setAuthError('We couldn’t sign you in with those details. Try your demo account or create a new one.'); return; }
-      session.email = values.email;
-      localStorage.setItem('mindease:email', session.email);
-      session.stage = accounts[values.email].verified ? 'privacy' : 'verify';
-    } else {
-      accounts[values.email] = { name: values.name, password: values.password, verified: false };
-      localStorage.setItem('mindease:accounts', JSON.stringify(accounts));
-      session.email = values.email;
-      localStorage.setItem('mindease:email', session.email);
-      session.stage = 'verify';
+    if (!supabaseConfigured || !supabase) { setAuthError('Secure account access is not configured yet.'); return; }
+    if (form.dataset.form === 'reset') {
+      const { error } = await supabase.auth.resetPasswordForEmail(values.email, { redirectTo: `${location.origin}${safeAuthRedirect('/auth/callback')}` });
+      if (error) { setAuthError('We could not send that reset email. Please try again.'); return; }
+      showAuthMessage('Reset link sent. Check your inbox for a secure link.');
+      return;
     }
-    authError = '';
+    const result = form.dataset.form === 'login'
+      ? await supabase.auth.signInWithPassword({ email: values.email, password: values.password })
+      : await supabase.auth.signUp({ email: values.email, password: values.password, options: { emailRedirectTo: `${location.origin}${safeAuthRedirect('/auth/callback')}`, data: { name: values.name } } });
+    if (result.error) { setAuthError('Authentication could not be completed. Please check your details and try again.'); return; }
+    session.email = values.email;
+    localStorage.setItem('mindease:email', session.email);
+    session.stage = form.dataset.form === 'signup' ? 'verify' : 'privacy';
     track(form.dataset.form);
     render();
   }));
@@ -265,4 +266,11 @@ function handleAction(action) {
   showToast('This space is being prepared for you.');
 }
 
-render();
+async function bootstrapAuth() {
+  if (!supabase) { render(); return; }
+  const { data: userData } = await supabase.auth.getUser();
+  if (userData.user) { session.authenticated = true; session.email = userData.user.email || ''; }
+  supabase.auth.onAuthStateChange((_event, user) => { session.authenticated = Boolean(user); session.email = user?.email || ''; render(); });
+  render();
+}
+bootstrapAuth();
