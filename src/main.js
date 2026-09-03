@@ -16,8 +16,24 @@ const navItems = [
 
 const app = document.querySelector('#app');
 let activeView = 'home';
-let selectedMood = 'okay';
+let selectedMood = localStorage.getItem('mindease:mood') || 'okay';
 let journalStarted = false;
+const storedSettings = JSON.parse(localStorage.getItem('mindease:settings') || '{}');
+const session = {
+  authenticated: localStorage.getItem('mindease:session') === 'active',
+  stage: 'welcome',
+  email: localStorage.getItem('mindease:email') || '',
+};
+const settings = {
+  notifications: storedSettings.notifications ?? true,
+  analytics: storedSettings.analytics ?? false,
+  crashReports: storedSettings.crashReports ?? true,
+  healthData: storedSettings.healthData ?? false,
+  beta: storedSettings.beta ?? false,
+};
+function persistSettings() { localStorage.setItem('mindease:settings', JSON.stringify(settings)); }
+function track(event) { window.__mindeaseAnalytics = [...(window.__mindeaseAnalytics || []), { event, at: new Date().toISOString() }]; }
+function reportError(error) { window.__mindeaseLastError = error instanceof Error ? error.message : String(error); }
 
 function icon(name) {
   const icons = {
@@ -31,6 +47,11 @@ function icon(name) {
 }
 
 function render() {
+  if (!session.authenticated) {
+    app.innerHTML = renderAuth();
+    attachAuthEvents();
+    return;
+  }
   app.innerHTML = `
     <div class="app-frame">
       <aside class="sidebar">
@@ -78,6 +99,38 @@ function render() {
   attachEvents();
 }
 
+function renderAuth() {
+  const stages = {
+    welcome: `<div class="auth-card auth-welcome"><div class="auth-brand"><span class="brand-mark">✦</span> mind<span>ease</span></div><div class="auth-robot">◡<i>✦</i></div><p class="overline">YOUR JOYFUL WELLNESS COMPANION</p><h1>Feel better,<br><em>one small step</em> at a time.</h1><p class="auth-copy">A private space to check in, reflect, and find your calm — made for student life.</p><button class="primary-button full-width" data-auth="signup">Get started ${icon('arrow')}</button><button class="text-button full-width" data-auth="login">I already have an account</button><p class="auth-footnote">By continuing, you agree to our privacy-first approach.</p></div>`,
+    signup: `<div class="auth-card"><button class="auth-back" data-auth="welcome">${icon('back')} Back</button><p class="overline">CREATE YOUR SPACE</p><h1>Let’s make room<br><em>for you.</em></h1><p class="auth-copy">Start with a private account. You can change your preferences anytime.</p><form class="auth-form" data-form="signup"><label>First name<input name="name" type="text" placeholder="Arjun" required autocomplete="given-name"></label><label>University email<input name="email" type="email" placeholder="you@university.edu" required autocomplete="email"></label><label>Password<input name="password" type="password" placeholder="At least 8 characters" minlength="8" required autocomplete="new-password"></label><label class="checkbox-label"><input name="terms" type="checkbox" required><span>I agree to the <button type="button" class="inline-link" data-auth="privacy">privacy policy</button> and community guidelines.</span></label><button class="primary-button full-width" type="submit">Create account ${icon('arrow')}</button></form><p class="auth-switch">Already a member? <button data-auth="login">Log in</button></p></div>`,
+    login: `<div class="auth-card"><button class="auth-back" data-auth="welcome">${icon('back')} Back</button><p class="overline">WELCOME BACK</p><h1>Good to see<br><em>you again.</em></h1><form class="auth-form" data-form="login"><label>Email<input name="email" type="email" placeholder="you@university.edu" required autocomplete="email"></label><label>Password<input name="password" type="password" placeholder="Your password" required autocomplete="current-password"></label><button type="button" class="forgot-link" data-auth="reset">Forgot password?</button><button class="primary-button full-width" type="submit">Log in ${icon('arrow')}</button></form><p class="auth-switch">New to MindEase? <button data-auth="signup">Create an account</button></p></div>`,
+    verify: `<div class="auth-card auth-centered"><span class="auth-status-icon">✉</span><p class="overline">ONE LAST STEP</p><h1>Check your<br><em>inbox.</em></h1><p class="auth-copy">We sent a verification link to <strong>${session.email || 'your email'}</strong>. Verify it to keep your wellness space secure.</p><button class="primary-button full-width" data-auth="privacy">I’ve verified my email ${icon('arrow')}</button><button class="text-button full-width" data-auth="signup">Use a different email</button><p class="auth-footnote">Didn’t receive it? <button class="inline-link" data-action="resend">Resend email</button></p></div>`,
+    privacy: `<div class="auth-card"><p class="overline">YOUR PRIVACY, YOUR CHOICE</p><h1>Set up your<br><em>safe space.</em></h1><p class="auth-copy">MindEase is designed to support you, never to judge you. Choose what you’re comfortable sharing.</p><div class="consent-list"><label class="consent-row"><span class="consent-icon">♧</span><span><strong>Gentle reminders</strong><small>Daily check-in notifications</small></span><input type="checkbox" data-setting="notifications" ${settings.notifications ? 'checked' : ''}></label><label class="consent-row"><span class="consent-icon">◈</span><span><strong>Health connections</strong><small>Optional wearable insights</small></span><input type="checkbox" data-setting="healthData" ${settings.healthData ? 'checked' : ''}></label><label class="consent-row"><span class="consent-icon">⌁</span><span><strong>Improve MindEase</strong><small>Anonymous product analytics</small></span><input type="checkbox" data-setting="analytics" ${settings.analytics ? 'checked' : ''}></label></div><button class="primary-button full-width" data-auth="complete">Enter my space ${icon('arrow')}</button><p class="auth-footnote">You can review or withdraw permissions anytime in Profile.</p></div>`,
+    reset: `<div class="auth-card"><button class="auth-back" data-auth="login">${icon('back')} Back to login</button><p class="overline">ACCOUNT RECOVERY</p><h1>Let’s get you<br><em>back in.</em></h1><p class="auth-copy">Enter your email and we’ll send a secure password reset link.</p><form class="auth-form" data-form="reset"><label>Email<input name="email" type="email" placeholder="you@university.edu" required autocomplete="email"></label><button class="primary-button full-width" type="submit">Send reset link ${icon('arrow')}</button></form></div>`,
+  };
+  return `<main class="auth-shell">${stages[session.stage]}</main>`;
+}
+function attachAuthEvents() {
+  document.querySelectorAll('[data-auth]').forEach((button) => button.addEventListener('click', () => {
+    const target = button.dataset.auth;
+    if (target === 'complete') { session.authenticated = true; localStorage.setItem('mindease:session', 'active'); persistSettings(); track('onboarding_complete'); activeView = 'home'; render(); return; }
+    session.stage = target; render();
+  }));
+  document.querySelectorAll('[data-setting]').forEach((input) => input.addEventListener('change', () => { settings[input.dataset.setting] = input.checked; persistSettings(); }));
+  document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => { if (button.dataset.action === 'resend') showAuthMessage('A fresh verification email is on its way.'); }));
+  document.querySelectorAll('[data-form]').forEach((form) => form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(form));
+    if (form.dataset.form === 'reset') { session.email = values.email; showAuthMessage('Reset link sent. Check your inbox.'); return; }
+    session.email = values.email;
+    localStorage.setItem('mindease:email', session.email);
+    session.stage = form.dataset.form === 'signup' ? 'verify' : 'privacy';
+    track(form.dataset.form);
+    render();
+  }));
+}
+function showAuthMessage(message) { const existing = document.querySelector('.auth-card'); const notice = document.createElement('p'); notice.className = 'form-notice'; notice.textContent = message; existing.querySelector('.auth-form').append(notice); }
+
 function renderView() {
   if (activeView === 'journal') return renderJournal();
   if (activeView === 'wellness') return renderWellness();
@@ -106,12 +159,14 @@ function renderWellness() {
 
 function renderCommunity() { return `<div class="view community-view"><div class="view-header"><div><p class="overline">A SPACE TO FEEL SEEN</p><h1>You’re in good company.</h1><p class="page-subtitle">Anonymous, moderated, and kind by design.</p></div><span class="header-art">♧</span></div><div class="community-banner"><div><span class="overline">TODAY’S COMMUNITY THEME</span><h2>What helped you feel a little lighter today?</h2><button class="primary-button" data-action="share">Share anonymously ${icon('arrow')}</button></div><span class="banner-art">☼</span></div><div class="section-heading"><div><p class="overline">FROM YOUR PEERS</p><h2>Recent reflections</h2></div><button class="link-button" data-action="filter">Latest ⌄</button></div><div class="post-list"><article class="post-card"><div class="post-meta"><span class="post-avatar avatar-lavender">S</span><span>student_07 · 8 min ago</span><span class="post-tag">EXAMS</span></div><p>“I finally took a proper break between study sessions today. It felt uncomfortable at first, but my brain thanked me later.”</p><div class="post-actions"><button data-action="support">♡ 24 found this helpful</button><button data-action="reply">○ Reply</button></div></article><article class="post-card"><div class="post-meta"><span class="post-avatar avatar-gold">A</span><span>anonymous · 32 min ago</span><span class="post-tag">SMALL WINS</span></div><p>“Asked a friend for help instead of pretending I understood the assignment. Tiny step, huge relief.”</p><div class="post-actions"><button data-action="support">♡ 18 found this helpful</button><button data-action="reply">○ Reply</button></div></article></div></div>`; }
 
-function renderProfile() { return `<div class="view profile-view"><div class="profile-hero"><div class="large-avatar">AS</div><div><p class="overline">YOUR MINDEASE PROFILE</p><h1>Arjun Sharma</h1><p class="page-subtitle">B.Tech CSE · Year 2</p></div><button class="icon-button edit-button" data-action="edit">✎</button></div><div class="profile-stat-row"><div><strong>12</strong><span>check-ins</span></div><div><strong>4</strong><span>day streak</span></div><div><strong>7</strong><span>reflections</span></div></div><section class="settings-card"><p class="overline">YOUR PREFERENCES</p><button class="setting-row" data-action="toggle"><span class="setting-icon">♧</span><span><strong>Daily check-in reminder</strong><small>Every day at 9:00 PM</small></span><span class="toggle is-on"><i></i></span></button><button class="setting-row" data-action="toast"><span class="setting-icon">◈</span><span><strong>Privacy & safety</strong><small>Your reflections stay yours</small></span>${icon('arrow')}</button><button class="setting-row" data-action="toast"><span class="setting-icon">?</span><span><strong>Help center</strong><small>Answers and support</small></span>${icon('arrow')}</button></section><p class="profile-owner">MindEase companion · Built with care for students</p></div>`; }
+function renderProfile() { return `<div class="view profile-view"><div class="profile-hero"><div class="large-avatar">AS</div><div><p class="overline">YOUR MINDEASE PROFILE</p><h1>Arjun Sharma</h1><p class="page-subtitle">B.Tech CSE · Year 2 · ${session.email || 'verified student'}</p></div><button class="icon-button edit-button" data-action="edit">✎</button></div><div class="profile-stat-row"><div><strong>12</strong><span>check-ins</span></div><div><strong>4</strong><span>day streak</span></div><div><strong>7</strong><span>reflections</span></div></div><section class="settings-card"><p class="overline">PRIVACY & PERMISSIONS</p>${settingRow('notifications', 'Gentle reminders', 'Daily check-in notifications', '♧')}${settingRow('healthData', 'Health connections', 'Wearable data is optional', '◈')}${settingRow('analytics', 'Anonymous analytics', 'Help us improve MindEase', '⌁')}${settingRow('crashReports', 'Crash reporting', 'Send diagnostic reports privately', '⚕')}</section><section class="settings-card account-card"><p class="overline">YOUR ACCOUNT</p><button class="setting-row" data-action="payment"><span class="setting-icon">₹</span><span><strong>MindEase Plus</strong><small>Unlock personalized care · ₹299/month</small></span><span class="plan-badge">UPGRADE</span></button><button class="setting-row" data-action="beta"><span class="setting-icon">✦</span><span><strong>Join the student beta</strong><small>${settings.beta ? 'You’re on the early access list' : 'Help shape what comes next'}</small></span>${icon('arrow')}</button><button class="setting-row" data-action="logout"><span class="setting-icon">↪</span><span><strong>Log out</strong><small>End this session on this device</small></span>${icon('arrow')}</button><button class="setting-row danger-row" data-action="delete"><span class="setting-icon">×</span><span><strong>Delete account</strong><small>Permanently remove your data</small></span>${icon('arrow')}</button></section><p class="profile-owner">MindEase companion · Built with care for students</p></div>`; }
+function settingRow(key, title, detail, glyph) { return `<label class="setting-row setting-label"><span class="setting-icon">${glyph}</span><span><strong>${title}</strong><small>${detail}</small></span><input type="checkbox" data-setting="${key}" ${settings[key] ? 'checked' : ''}><span class="toggle ${settings[key] ? 'is-on' : ''}"><i></i></span></label>`; }
 
 function showToast(message) { const toast = document.querySelector('.toast'); toast.textContent = message; toast.classList.add('is-visible'); window.setTimeout(() => toast.classList.remove('is-visible'), 2800); }
 function attachEvents() {
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => { activeView = button.dataset.view; render(); }));
   document.querySelectorAll('[data-mood]').forEach((button) => button.addEventListener('click', () => { selectedMood = button.dataset.mood; render(); }));
+  document.querySelectorAll('[data-setting]').forEach((input) => input.addEventListener('change', () => { settings[input.dataset.setting] = input.checked; persistSettings(); track(`setting_${input.dataset.setting}`); render(); }));
   document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => handleAction(button.dataset.action)));
 }
 function handleAction(action) {
@@ -119,11 +174,16 @@ function handleAction(action) {
   if (action === 'close-modal') { document.querySelector('.modal-backdrop').hidden = true; return; }
   if (action === 'connect') { document.querySelector('.modal-backdrop').hidden = true; showToast('Connecting you with a counselor now.'); return; }
   if (action === 'record') { journalStarted = !journalStarted; render(); return; }
-  if (action === 'check-in') { showToast(`Check-in saved. ${selectedMood === 'good' ? 'Keep that bright energy going.' : 'Thanks for checking in with yourself.'}`); return; }
-  if (action === 'start-resource') { showToast('Your exercise is ready. Take two quiet minutes for yourself.'); return; }
+  if (action === 'check-in') { localStorage.setItem('mindease:mood', selectedMood); track('mood_check_in'); showToast(`Check-in saved. ${selectedMood === 'good' ? 'Keep that bright energy going.' : 'Thanks for checking in with yourself.'}`); return; }
+  if (action === 'start-resource') { track('wellness_resource_started'); showToast('Your exercise is ready. Take two quiet minutes for yourself.'); return; }
   if (action === 'share') { showToast('Your reflection space is ready when you are.'); return; }
   if (action === 'support') { showToast('Sent a little support their way.'); return; }
   if (action === 'edit') { showToast('Profile editing will be available soon.'); return; }
+  if (action === 'resend') { showToast('A fresh verification email is on its way.'); return; }
+  if (action === 'payment') { showToast('Secure checkout is ready for the Plus plan.'); track('payment_started'); return; }
+  if (action === 'beta') { settings.beta = true; persistSettings(); showToast('You’re on the MindEase student beta list.'); render(); return; }
+  if (action === 'logout') { session.authenticated = false; session.stage = 'welcome'; localStorage.removeItem('mindease:session'); render(); return; }
+  if (action === 'delete') { if (window.confirm('Delete your MindEase account and local data?')) { localStorage.clear(); session.authenticated = false; session.stage = 'welcome'; render(); } return; }
   if (action === 'toggle') { const toggle = document.querySelector('.toggle'); toggle.classList.toggle('is-on'); showToast(toggle.classList.contains('is-on') ? 'Reminder turned on.' : 'Reminder turned off.'); return; }
   showToast('This space is being prepared for you.');
 }
